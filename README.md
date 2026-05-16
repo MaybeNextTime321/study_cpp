@@ -39,7 +39,6 @@ calculation -f <n> -s <n> -o <op>
 | Multiplication | `*` |
 | Division | `/` |
 | Power | `^` |
-| Modulo | `%` |
 | Factorial | `!` |
 
 > **Note:** wrap `*` in quotes to prevent shell expansion: `--operation '*'`
