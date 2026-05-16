@@ -58,3 +58,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_CO
 
 
 target_link_libraries(${PROJECT_NAME} PRIVATE math)
+
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
