@@ -58,6 +58,20 @@ bool parseOperation(const char* optarg, char& operationVariable)
     }
 }
 
+void printHelp()
+{
+    std::cout << "Usage my calculation " << " [OPTIONS]\n"
+              << "Options:\n"
+              << "  --firstNumber,  -f  First number\n"
+              << "  --secondNumber, -s  Second number\n"
+              << "  --operation,    -o  Operation (+, -, *, /, ^, !, %)\n"
+              << "  --help,         -h  Show this help\n"
+              << "Example:\n"
+              << "  " << "calculation"
+              << " --firstNumber 5 --secondNumber 3 --operation +\n"
+              << "  Note: use quotes for * operator: --operation '*'\n";
+}
+
 void printResult(utility::Task& task)
 {
     switch (task.operationStatus)
@@ -77,6 +91,9 @@ void printResult(utility::Task& task)
             break;
         case math::MathStatus::ParseError:
             std::cout << "Error: ParseError" << '\n';
+            break;
+        case math::MathStatus::Help:
+            printHelp();
             break;
     }
 }
@@ -124,6 +141,7 @@ void makeTask(utility::Task& task, const int& argc, char* argv[])
     int arg = 0;
 
     static struct option longOptions[] = {
+        {"help", no_argument, nullptr, 'h'},
         {"firstNumber", required_argument, nullptr, 'f'},
         {"secondNumber", required_argument, nullptr, 's'},
         {"operation", required_argument, nullptr, 'o'},
@@ -144,6 +162,10 @@ void makeTask(utility::Task& task, const int& argc, char* argv[])
 
         switch (arg)
         {
+            case 'h':
+                task.operationStatus = math::MathStatus::Help;
+                return;
+                break;
             case 'f':
                 if (!charToInt(optarg, task.firstNumber))
                 {
