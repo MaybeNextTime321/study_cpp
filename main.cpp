@@ -4,7 +4,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <iostream>
 
 #include "cmath"
 
@@ -29,12 +28,14 @@ bool charToInt(char* optarg, int& variableToWrite)
     parsed = strtol(optarg, &end, numberSystem);
     if (end == optarg || *end != '\0')
     {
-        std::cout << "Error while parsing par: " << optarg << '\n';
+        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+            "Error while parsing par: %s\n", optarg);
         return false;
     }
 
     variableToWrite = static_cast<int>(parsed);
-    std::cout << "Parsed par: " << variableToWrite << '\n';
+    printf("Parsed par: %i \n", // NOLINT(cppcoreguidelines-pro-type-vararg)
+           variableToWrite);
     return true;
 }
 
@@ -49,27 +50,36 @@ bool parseOperation(const char* optarg, char& operationVariable)
         case '/':
         case '^':
         case '!':
-            std::cout << "Parsed op: " << operation << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Parsed op: %c\n", operation);
             operationVariable = operation;
             return true;
         default:
-            std::cout << "Error while parsing op: " << operation << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Error while parsing op:%c\n", operation);
             return false;
     }
 }
 
 void printHelp()
 {
-    std::cout << "Usage my calculation " << " [OPTIONS]\n"
-              << "Options:\n"
-              << "  --firstNumber,  -f  First number\n"
-              << "  --secondNumber, -s  Second number\n"
-              << "  --operation,    -o  Operation (+, -, *, /, ^, !, %)\n"
-              << "  --help,         -h  Show this help\n"
-              << "Example:\n"
-              << "  " << "calculation"
-              << " --firstNumber 5 --secondNumber 3 --operation +\n"
-              << "  Note: use quotes for * operator: --operation '*'\n";
+    printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "Usage my calculation  [OPTIONS]:\n");
+    printf("Options:\n"); // NOLINT(cppcoreguidelines-pro-type-vararg)
+    printf(               // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "  --firstNumber,  -f  First number\n");
+    printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "  --secondNumber, -s  Second number\n");
+    printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "  --operation,    -o  Operation (+, -, *, /, ^, !, %%)\n");
+    printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "  --help,         -h  Show this help\n");
+    printf("Example:\n");    // NOLINT(cppcoreguidelines-pro-type-vararg)
+    printf("  calculation"); // NOLINT(cppcoreguidelines-pro-type-vararg)
+    printf(                  // NOLINT(cppcoreguidelines-pro-type-vararg)
+        " --firstNumber 5 --secondNumber 3 --operation +\n");
+    printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+        "  Note: use quotes for * operator: --operation '*'\n");
 }
 
 void printResult(utility::Task& task)
@@ -77,20 +87,26 @@ void printResult(utility::Task& task)
     switch (task.operationStatus)
     {
         case math::MathStatus::Ok:
-            std::cout << "Operation status: OK" << '\n'
-                      << "Result is: " << task.result << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Operation status: OK\n");
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Result is: %f\n", task.result);
             break;
         case math::MathStatus::DivideByZero:
-            std::cout << "Error: DivideByZero" << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Error: DivideByZero\n");
             break;
         case math::MathStatus::Overflow:
-            std::cout << "Error: Overflow" << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Error: Overflow\n");
             break;
         case math::MathStatus::FactorialFromNegative:
-            std::cout << "Error: FactorialFromNegative" << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Error: FactorialFromNegative\n");
             break;
         case math::MathStatus::ParseError:
-            std::cout << "Error: ParseError" << '\n';
+            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
+                "Error: ParseError\n");
             break;
         case math::MathStatus::Help:
             printHelp();
