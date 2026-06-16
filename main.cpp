@@ -4,6 +4,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <iostream>
 
 #include "cmath"
 
@@ -108,9 +110,7 @@ class Application
         parsed = strtol(optarg, &end, numberSystem);
         if (end == optarg || *end != '\0')
         {
-            printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                "Error while parsing par: %s\n", optarg);
-            return false;
+            throw("Par is empty or couldn't be parsed");
         }
 
         variableToWrite = static_cast<int>(parsed);
@@ -137,8 +137,7 @@ class Application
                 task_.operation = operation;
                 return true;
             default:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Error while parsing op:%c\n", operation);
+                throw("Operator is empty or couldn't be parsed");
                 return false;
         }
     }
@@ -174,24 +173,59 @@ class Application
                     return;
                     break;
                 case 'f':
-                    if (!charToInt(optarg, task_.firstNumber))
+                    try
                     {
+                        charToInt(optarg, task_.firstNumber);
+                    }
+                    catch (const char* error)
+                    {
+                        std::cerr
+                            << "Error while parsing First number: " << error
+                            << '\n';
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
+                    }
+                    catch (...)
+                    {
+                        std::cerr
+                            << "Unknown error while parsing First number\n";
                     }
                     break;
                 case 's':
-                    if (!charToInt(optarg, task_.secondNumber))
+                    try
                     {
+                        charToInt(optarg, task_.secondNumber);
+                    }
+                    catch (const char* error)
+                    {
+                        std::cerr
+                            << "Error while parsing Second number: " << error
+                            << '\n';
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
                     }
+                    catch (...)
+                    {
+                        std::cerr
+                            << "Unknown error while parsing Second number\n";
+                    }
+
                     break;
                 case 'o':
-                    if (!parseOperation(optarg))
+                    try
                     {
+                        parseOperation(optarg);
+                    }
+                    catch (const char* error)
+                    {
+                        std::cerr << "Error while parsing Operator: " << error
+                                  << '\n';
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
+                    }
+                    catch (...)
+                    {
+                        std::cerr << "Unknown error while parsing Operator\n";
                     }
                     break;
                 case '?':
