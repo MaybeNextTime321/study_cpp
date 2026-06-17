@@ -1,3 +1,5 @@
+#include "spdlog/spdlog.h"
+
 #include <customMath.h>
 #include <getopt.h>
 #include <unistd.h>
@@ -8,6 +10,58 @@
 #include <iostream>
 
 #include "cmath"
+
+namespace utility
+{
+class Logger
+{
+  public:
+    static Logger& getInstance()
+    {
+        static Logger instance;
+        return instance;
+    }
+
+    enum LogLevel : uint8_t
+    {
+        INFO,
+        DEBUG,
+        WARN,
+        CRITICAL,
+        ERROR
+    };
+
+    void log( // NOLINT(readability-convert-member-functions-to-static)
+        const std::string& msg, LogLevel logLever)
+    {
+        switch (logLever)
+        {
+            case LogLevel::INFO:
+                spdlog::info(msg);
+                break;
+
+            case LogLevel::DEBUG:
+                spdlog::debug(msg);
+                break;
+
+            case LogLevel::WARN:
+                spdlog::warn(msg);
+                break;
+
+            case LogLevel::CRITICAL:
+                spdlog::critical(msg);
+                break;
+
+            case LogLevel::ERROR:
+                spdlog::error(msg);
+                break;
+
+            default:
+                break;
+        }
+    }
+};
+} // namespace utility
 
 namespace calculator
 {
@@ -72,26 +126,27 @@ class Application
         switch (task_.operationStatus)
         {
             case math::MathStatus::Ok:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Operation status: OK\n");
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Result is: %f\n", task_.result);
+                utility::Logger::getInstance().log(
+                    "Operation status: OK", utility::Logger::LogLevel::INFO);
+                utility::Logger::getInstance().log(
+                    std::string("Result is: ") + std::to_string(task_.result),
+                    utility::Logger::LogLevel::INFO);
                 break;
             case math::MathStatus::DivideByZero:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Error: DivideByZero\n");
+                utility::Logger::getInstance().log(
+                    "DivideByZero", utility::Logger::LogLevel::ERROR);
                 break;
             case math::MathStatus::Overflow:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Error: Overflow\n");
+                utility::Logger::getInstance().log(
+                    "Overflow", utility::Logger::LogLevel::ERROR);
                 break;
             case math::MathStatus::FactorialFromNegative:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Error: FactorialFromNegative\n");
+                utility::Logger::getInstance().log(
+                    "FactorialFromNegative", utility::Logger::LogLevel::ERROR);
                 break;
             case math::MathStatus::ParseError:
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Error: ParseError\n");
+                utility::Logger::getInstance().log(
+                    "ParseError", utility::Logger::LogLevel::ERROR);
                 break;
             case math::MathStatus::Help:
                 printHelp();
@@ -114,8 +169,9 @@ class Application
         }
 
         variableToWrite = static_cast<int>(parsed);
-        printf("Parsed par: %i \n", // NOLINT(cppcoreguidelines-pro-type-vararg)
-               variableToWrite);
+        utility::Logger::getInstance().log(std::string("Parsed par:") +
+                                               std::to_string(variableToWrite),
+                                           utility::Logger::LogLevel::INFO);
         return true;
     }
 
@@ -132,8 +188,9 @@ class Application
             case '/':
             case '^':
             case '!':
-                printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-                    "Parsed op: %c\n", operation);
+                utility::Logger::getInstance().log(
+                    std::string("Parsed op::") + operation,
+                    utility::Logger::LogLevel::INFO);
                 task_.operation = operation;
                 return true;
             default:
@@ -179,16 +236,18 @@ class Application
                     }
                     catch (const char* error)
                     {
-                        std::cerr
-                            << "Error while parsing First number: " << error
-                            << '\n';
+                        utility::Logger::getInstance().log(
+                            std::string("Error while parsing First number: ") +
+                                error,
+                            utility::Logger::LogLevel::ERROR);
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
                     }
-                    catch (...)
+                    catch (...) // NOLINT(bugprone-empty-catch)
                     {
-                        std::cerr
-                            << "Unknown error while parsing First number\n";
+                        utility::Logger::getInstance().log(
+                            "Unknown error while parsing First number",
+                            utility::Logger::LogLevel::ERROR);
                     }
                     break;
                 case 's':
@@ -198,16 +257,18 @@ class Application
                     }
                     catch (const char* error)
                     {
-                        std::cerr
-                            << "Error while parsing Second number: " << error
-                            << '\n';
+                        utility::Logger::getInstance().log(
+                            std::string("Error while parsing Second number: ") +
+                                error,
+                            utility::Logger::LogLevel::ERROR);
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
                     }
-                    catch (...)
+                    catch (...) // NOLINT(bugprone-empty-catch)
                     {
-                        std::cerr
-                            << "Unknown error while parsing Second number\n";
+                        utility::Logger::getInstance().log(
+                            "Unknown error while parsing Second number",
+                            utility::Logger::LogLevel::ERROR);
                     }
 
                     break;
@@ -218,14 +279,18 @@ class Application
                     }
                     catch (const char* error)
                     {
-                        std::cerr << "Error while parsing Operator: " << error
-                                  << '\n';
+                        utility::Logger::getInstance().log(
+                            std::string("Error while parsing Operator: ") +
+                                error,
+                            utility::Logger::LogLevel::ERROR);
                         task_.operationStatus = math::MathStatus::ParseError;
                         return;
                     }
-                    catch (...)
+                    catch (...) // NOLINT(bugprone-empty-catch)
                     {
-                        std::cerr << "Unknown error while parsing Operator\n";
+                        utility::Logger::getInstance().log(
+                            "Unknown error while parsing operator",
+                            utility::Logger::LogLevel::ERROR);
                     }
                     break;
                 case '?':
@@ -239,23 +304,25 @@ class Application
     void printHelp() // NOLINT(readability-convert-member-functions-to-static)
         const
     {
-        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "Usage my calculation  [OPTIONS]:\n");
-        printf("Options:\n"); // NOLINT(cppcoreguidelines-pro-type-vararg)
-        printf(               // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "  --firstNumber,  -f  First number\n");
-        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "  --secondNumber, -s  Second number\n");
-        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "  --operation,    -o  Operation (+, -, *, /, ^, !, %%)\n");
-        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "  --help,         -h  Show this help\n");
-        printf("Example:\n");    // NOLINT(cppcoreguidelines-pro-type-vararg)
-        printf("  calculation"); // NOLINT(cppcoreguidelines-pro-type-vararg)
-        printf(                  // NOLINT(cppcoreguidelines-pro-type-vararg)
-            " --firstNumber 5 --secondNumber 3 --operation +\n");
-        printf( // NOLINT(cppcoreguidelines-pro-type-vararg)
-            "  Note: use quotes for * operator: --operation '*'\n");
+        utility::Logger::getInstance().log("Options:",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log("--firstNumber,  -f  First number",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log("--secondNumber, -s  Second number",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "--operation,    -o  Operation (+, -, *, /, ^, !, %%)",
+            utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log("--help,         -h  Show this help",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log("Example",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "calculation --firstNumber 5 --secondNumber 3 --operation +",
+            utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "Note: use quotes for * operator: --operation '*'",
+            utility::Logger::LogLevel::INFO);
     }
 
     struct Task

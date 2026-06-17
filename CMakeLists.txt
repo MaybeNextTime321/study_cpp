@@ -11,6 +11,16 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(math)
 
+FetchContent_Declare(
+  		spdlog
+  	    GIT_REPOSITORY git@github.com:gabime/spdlog.git
+		GIT_TAG v1.14.1
+)
+
+FetchContent_MakeAvailable(spdlog)
+
+set_target_properties(spdlog PROPERTIES CXX_CLANG_TIDY "")
+
 add_executable(${PROJECT_NAME} main.cpp)
 
 target_compile_options(${PROJECT_NAME}
@@ -58,6 +68,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_CO
 
 
 target_link_libraries(${PROJECT_NAME} PRIVATE math)
+target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
 
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
