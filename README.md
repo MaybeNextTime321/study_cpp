@@ -8,7 +8,7 @@ A simple command-line calculator that supports basic arithmetic operations.
 - GCC 13+ or Clang 18+
 - clang-format
 - clang-tidy
-- Git (for fetching math library)
+- Git (for fetching dependencies)
 
 ## Build & Install
 
@@ -21,14 +21,16 @@ sudo cmake --build build --target install
 ## Usage
 
 ```bash
-calculation --firstNumber <n> --secondNumber <n> --operation <op>
+calculation '<JSON string>'
 ```
 
-Or with short flags:
+### JSON Fields
 
-```bash
-calculation -f <n> -s <n> -o <op>
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `firstNumber` | integer | First operand |
+| `secondNumber` | integer | Second operand |
+| `operation` | string | Operator symbol |
 
 ### Supported Operations
 
@@ -41,28 +43,28 @@ calculation -f <n> -s <n> -o <op>
 | Power | `^` |
 | Factorial | `!` |
 
-> **Note:** wrap `*` in quotes to prevent shell expansion: `--operation '*'`
+> **Note:** wrap JSON in single quotes to prevent shell expansion
 
 ## Examples
 
 ```bash
 # Addition
-calculation --firstNumber 5 --secondNumber 3 --operation +
+calculation '{"firstNumber": 5, "secondNumber": 3, "operation": "+"}'
 
 # Subtraction
-calculation -f 10 -s 4 -o -
+calculation '{"firstNumber": 10, "secondNumber": 4, "operation": "-"}'
 
-# Multiplication (note the quotes)
-calculation --firstNumber 6 --secondNumber 7 --operation '*'
+# Multiplication
+calculation '{"firstNumber": 6, "secondNumber": 7, "operation": "*"}'
 
 # Division
-calculation --firstNumber 10 --secondNumber 3 --operation /
+calculation '{"firstNumber": 10, "secondNumber": 3, "operation": "/"}'
 
 # Power
-calculation --firstNumber 2 --secondNumber 10 --operation ^
+calculation '{"firstNumber": 2, "secondNumber": 10, "operation": "^"}'
 
 # Factorial (secondNumber is ignored)
-calculation --firstNumber 5 --secondNumber 0 --operation '!'
+calculation '{"firstNumber": 5, "secondNumber": 0, "operation": "!"}'
 ```
 
 ## Error Handling
@@ -72,6 +74,7 @@ The calculator detects and reports the following errors:
 - Division by zero
 - Integer overflow
 - Factorial of a negative number
+- Invalid JSON input
 - Invalid input arguments
 
 ## Help
