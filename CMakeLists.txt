@@ -19,6 +19,14 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(spdlog)
 
+FetchContent_Declare(
+  		json
+  	    GIT_REPOSITORY git@github.com:nlohmann/json.git
+		GIT_TAG v3.12.0
+)
+
+FetchContent_MakeAvailable(json)
+
 set_target_properties(spdlog PROPERTIES CXX_CLANG_TIDY "")
 
 add_executable(${PROJECT_NAME} main.cpp)
@@ -48,6 +56,7 @@ file(GLOB_RECURSE CLANG_FORMAT_SRC CONFIGURE_DEPENDS
         *.cpp
         *.hpp
 )
+list(FILTER CLANG_FORMAT_SRC EXCLUDE REGEX ".*/_deps/.*")
 
 add_custom_target(clang-format-fix
 	COMMAND
@@ -69,6 +78,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_CO
 
 target_link_libraries(${PROJECT_NAME} PRIVATE math)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
+target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
 
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin

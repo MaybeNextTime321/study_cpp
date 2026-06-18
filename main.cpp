@@ -4,6 +4,8 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include <nlohmann/json.hpp>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -79,6 +81,24 @@ class Application
     }
 
   private:
+    template <typename T>
+    void parseVariableToValue(nlohmann::json& json, T& variableToWrite,
+                              const std::string& key)
+    {
+        try
+        {
+            variableToWrite = json[key].get<T>();
+        }
+        catch (...)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while loading " + key +
+                            " in JSON. Please check you input"),
+                utility::Logger::LogLevel::CRITICAL);
+            task_.operationStatus = math::MathStatus::ParseError;
+        }
+    }
+
     void makeCalculate()
     {
         if (task_.operationStatus != math::MathStatus::Ok)
@@ -154,27 +174,6 @@ class Application
         }
     }
 
-    bool
-        charToInt( // NOLINT(readability-convert-member-functions-to-static,-warnings-as-errors)
-            char* optarg, int& variableToWrite)
-    {
-
-        char* end = nullptr;
-        const int16_t numberSystem = 10;
-        int64_t parsed = 0;
-        parsed = strtol(optarg, &end, numberSystem);
-        if (end == optarg || *end != '\0')
-        {
-            throw("Par is empty or couldn't be parsed");
-        }
-
-        variableToWrite = static_cast<int>(parsed);
-        utility::Logger::getInstance().log(std::string("Parsed par:") +
-                                               std::to_string(variableToWrite),
-                                           utility::Logger::LogLevel::INFO);
-        return true;
-    }
-
     bool parseOperation(
         const char*
             optarg) // NOLINT(readability-convert-member-functions-to-static,-warnings-as-errors)
@@ -204,127 +203,71 @@ class Application
         int arg = 0;
 
         static struct option longOptions[] = {
-            {"help", no_argument, nullptr, 'h'},
-            {"firstNumber", required_argument, nullptr, 'f'},
-            {"secondNumber", required_argument, nullptr, 's'},
-            {"operation", required_argument, nullptr, 'o'},
-            {nullptr, 0, nullptr, 0}};
+            {"help", no_argument, nullptr, 'h'}, {nullptr, 0, nullptr, 0}};
 
-        while (true)
+        int optionIndex = 0;
+        arg = getopt_long( // NOLINT(concurrency-mt-unsafe, cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+            argc, argv, "h",
+            longOptions, // NOLINT(concurrency-mt-unsafe, cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+            &optionIndex);
+
+        if (arg == 'h')
         {
-            int optionIndex = 0;
-            arg = getopt_long( // NOLINT(concurrency-mt-unsafe, cppcoreguidelines-pro-bounds-array-to-pointer-decay)
-                argc, argv, "f:s:o:",
-                longOptions, // NOLINT(concurrency-mt-unsafe, cppcoreguidelines-pro-bounds-array-to-pointer-decay)
-                &optionIndex);
-
-            if (arg == -1)
-            {
-                break;
-            }
-
-            switch (arg)
-            {
-                case 'h':
-                    task_.operationStatus = math::MathStatus::Help;
-                    return;
-                    break;
-                case 'f':
-                    try
-                    {
-                        charToInt(optarg, task_.firstNumber);
-                    }
-                    catch (const char* error)
-                    {
-                        utility::Logger::getInstance().log(
-                            std::string("Error while parsing First number: ") +
-                                error,
-                            utility::Logger::LogLevel::ERROR);
-                        task_.operationStatus = math::MathStatus::ParseError;
-                        return;
-                    }
-                    catch (...) // NOLINT(bugprone-empty-catch)
-                    {
-                        utility::Logger::getInstance().log(
-                            "Unknown error while parsing First number",
-                            utility::Logger::LogLevel::ERROR);
-                    }
-                    break;
-                case 's':
-                    try
-                    {
-                        charToInt(optarg, task_.secondNumber);
-                    }
-                    catch (const char* error)
-                    {
-                        utility::Logger::getInstance().log(
-                            std::string("Error while parsing Second number: ") +
-                                error,
-                            utility::Logger::LogLevel::ERROR);
-                        task_.operationStatus = math::MathStatus::ParseError;
-                        return;
-                    }
-                    catch (...) // NOLINT(bugprone-empty-catch)
-                    {
-                        utility::Logger::getInstance().log(
-                            "Unknown error while parsing Second number",
-                            utility::Logger::LogLevel::ERROR);
-                    }
-
-                    break;
-                case 'o':
-                    try
-                    {
-                        parseOperation(optarg);
-                    }
-                    catch (const char* error)
-                    {
-                        utility::Logger::getInstance().log(
-                            std::string("Error while parsing Operator: ") +
-                                error,
-                            utility::Logger::LogLevel::ERROR);
-                        task_.operationStatus = math::MathStatus::ParseError;
-                        return;
-                    }
-                    catch (...) // NOLINT(bugprone-empty-catch)
-                    {
-                        utility::Logger::getInstance().log(
-                            "Unknown error while parsing operator",
-                            utility::Logger::LogLevel::ERROR);
-                    }
-                    break;
-                case '?':
-                    break;
-                default:
-                    abort();
-            }
+            task_.operationStatus = math::MathStatus::Help;
+            return;
         }
+
+        nlohmann::json jsonInput;
+
+        try
+        {
+            jsonInput = nlohmann::json::parse(
+                argv[1]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        }
+        catch (...)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while loading JSON. Please check you input"),
+                utility::Logger::LogLevel::CRITICAL);
+            task_.operationStatus = math::MathStatus::ParseError;
+            return;
+        }
+
+        parseVariableToValue(jsonInput, task_.firstNumber, "firstNumber");
+        parseVariableToValue(jsonInput, task_.secondNumber, "secondNumber");
+        std::string operationString{};
+        parseVariableToValue(jsonInput, operationString, "operation");
+        task_.operation = operationString[0];
     }
 
     void printHelp() // NOLINT(readability-convert-member-functions-to-static)
         const
     {
-        utility::Logger::getInstance().log("Options:",
+        utility::Logger::getInstance().log("Usage:",
                                            utility::Logger::LogLevel::INFO);
-        utility::Logger::getInstance().log("--firstNumber,  -f  First number",
+        utility::Logger::getInstance().log("  calculation '<JSON string>'",
                                            utility::Logger::LogLevel::INFO);
-        utility::Logger::getInstance().log("--secondNumber, -s  Second number",
-                                           utility::Logger::LogLevel::INFO);
-        utility::Logger::getInstance().log(
-            "--operation,    -o  Operation (+, -, *, /, ^, !, %%)",
-            utility::Logger::LogLevel::INFO);
-        utility::Logger::getInstance().log("--help,         -h  Show this help",
-                                           utility::Logger::LogLevel::INFO);
-        utility::Logger::getInstance().log("Example",
+        utility::Logger::getInstance().log("JSON fields:",
                                            utility::Logger::LogLevel::INFO);
         utility::Logger::getInstance().log(
-            "calculation --firstNumber 5 --secondNumber 3 --operation +",
+            "  firstNumber  — first operand (integer)",
             utility::Logger::LogLevel::INFO);
         utility::Logger::getInstance().log(
-            "Note: use quotes for * operator: --operation '*'",
+            "  secondNumber — second operand (integer)",
+            utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "  operation    — operator (+, -, *, /, ^, !)",
+            utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log("Example:",
+                                           utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "  calculation '{\"firstNumber\": 5, \"secondNumber\": 3, "
+            "\"operation\": \"+\"}'",
+            utility::Logger::LogLevel::INFO);
+        utility::Logger::getInstance().log(
+            "Note: wrap JSON in single quotes to prevent shell expansion",
             utility::Logger::LogLevel::INFO);
     }
-
     struct Task
     {
         int firstNumber{0};
@@ -340,7 +283,7 @@ class Application
 
 } // namespace calculator
 
-int main(int argc, char** argv)
+int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 {
     calculator::Application application;
     application.run(argc, argv);
