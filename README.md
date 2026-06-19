@@ -77,6 +77,29 @@ The calculator detects and reports the following errors:
 - Invalid JSON input
 - Invalid input arguments
 
+## Running Tests
+
+This project includes unit tests located in:
+
+```test/test.cpp```
+
+Tests are built using GoogleTest and integrated via CTest.
+
+### Build tests
+
+Tests are built automatically with the project:
+
+```bash
+cmake -B build
+cmake --build build
+```
+
+### Run all tests
+```bash
+ctest --test-dir build
+```
+
+
 ## Help
 
 ```bash
