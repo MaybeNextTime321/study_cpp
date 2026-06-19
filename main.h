@@ -18,6 +18,11 @@ namespace utility
 {
 class Logger
 {
+  private:
+    Logger() = default;
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+
   public:
     static Logger& getInstance()
     {
