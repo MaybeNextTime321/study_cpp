@@ -2,12 +2,13 @@ cmake_minimum_required(VERSION 3.8)
 project(calculation)
 
 include(FetchContent)
+include(CTest)
 
 FetchContent_Declare(
   	math
   	    GIT_REPOSITORY git@github.com:MaybeNextTime321/simple-math-library.git
 	    GIT_TAG main
-)
+	)
 
 FetchContent_MakeAvailable(math)
 
@@ -88,17 +89,19 @@ add_custom_target(clang-format-fix
 
 add_dependencies(${PROJECT_NAME} clang-format-fix)
 
-
+find_package(PostgreSQL REQUIRED)
 find_program(CLANG_TIDY_PATH NAMES clang-tidy-21 clang-tidy-18 clang-tidy REQUIRED)
 message(STATUS "Found clang-tidy: ${CLANG_TIDY_PATH}")
 set(CLANG_TIDY_COMMAND ${CLANG_TIDY_PATH} "-config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
 
 
+target_link_libraries(${PROJECT_NAME} PRIVATE PostgreSQL::PostgreSQL)
 target_link_libraries(${PROJECT_NAME} PRIVATE math)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
 target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main math spdlog nlohmann_json::nlohmann_json)
+target_link_libraries(unit_tests PRIVATE PostgreSQL::PostgreSQL)
 
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
