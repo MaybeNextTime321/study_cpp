@@ -80,67 +80,50 @@ class DataBase
   public:
     DataBase()
     {
-        conn = PQconnectdb(conninfo);
+        conn.reset(PQconnectdb(conninfo.c_str()));
+
+        if (!conn)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
 
         /* Check to see that the backend connection was successfully made */
-        if (PQstatus(conn) != CONNECTION_OK)
+        if (PQstatus(conn.get()) != CONNECTION_OK)
         {
             utility::Logger::getInstance().log(
                 std::string("Error while connect to Data Base " +
-                            std::string(PQerrorMessage(conn))),
+                            std::string(PQerrorMessage(conn.get()))),
                 utility::Logger::LogLevel::CRITICAL);
             return;
         }
 
-        res = PQexec(conn,
-                     "SELECT pg_catalog.set_config('search_path', '', false)");
-        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        res.reset(
+            PQexec(conn.get(),
+                   "SELECT pg_catalog.set_config('search_path', '', false)"));
+        if (PQresultStatus(res.get()) != PGRES_TUPLES_OK)
         {
             utility::Logger::getInstance().log(
                 std::string("Data Base SET failed: " +
-                            std::string(PQerrorMessage(conn))),
+                            std::string(PQerrorMessage(conn.get()))),
                 utility::Logger::LogLevel::CRITICAL);
-            PQclear(res);
             return;
-        }
-
-        PQclear(res);
-    }
-    ~DataBase()
-    {
-        PQfinish(conn);
-    }
-
-    DataBase& operator=(const DataBase& other) = delete;
-    DataBase(const DataBase& other) = delete;
-
-    DataBase& operator=(
-        DataBase&& other) // NOLINT(readability-redundant-access-specifiers)
-    {
-        if (this != &other)
-        {
-            conn = other.conn;
-            res = other.res;
-            notify = other.notify;
-            nnotifies = other.nnotifies;
-        }
-        return *this;
-    }
-
-    DataBase(DataBase&& other)
-    {
-        if (this != &other)
-        {
-            conn = other.conn;
-            res = other.res;
-            notify = other.notify;
-            nnotifies = other.nnotifies;
         }
     }
 
     void WriteTask(int firstNumber, int secondNumber, char operation,
                    double result) // NOLINT(unused-parameter)
     {
+        if (!conn)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+
         std::string connectionValue = "INSERT INTO public.calculation "
                                       "(operation, firstNumber, secondNumber, "
                                       "result) VALUES ('" +
@@ -149,32 +132,40 @@ class DataBase
                                       std::to_string(secondNumber) + ", " +
                                       std::to_string(result) + ");";
 
-        res = PQexec(conn, connectionValue.c_str());
-        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        res.reset(PQexec(conn.get(), connectionValue.c_str()));
+        if (PQresultStatus(res.get()) != PGRES_COMMAND_OK)
         {
             utility::Logger::getInstance().log(
                 std::string("Eroor while write in Data Base: " +
-                            std::string(PQerrorMessage(conn))),
+                            std::string(PQerrorMessage(conn.get()))),
                 utility::Logger::LogLevel::CRITICAL);
-            PQclear(res);
             return;
         }
-        PQclear(res);
     }
 
     void GetOperations(std::unordered_map<std::string, int>& operations)
     {
-        res = PQexec(conn, "SELECT * FROM public.calculation");
-
-        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        if (!conn)
         {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+        res.reset(PQexec(conn.get(), "SELECT * FROM public.calculation"));
+
+        if (res == nullptr || PQresultStatus(res.get()) != PGRES_TUPLES_OK)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error While Get Operation from Data Base"),
+                utility::Logger::LogLevel::CRITICAL);
             return;
         }
 
         utility::Logger::getInstance().log(
             std::string("Start Loading Cash data: "),
             utility::Logger::LogLevel::INFO);
-        size_t rows = PQntuples(res);
+        size_t rows = PQntuples(res.get());
 
         utility::Logger::getInstance().log(
             std::string("Founded " + std::to_string(rows) + " records"),
@@ -182,10 +173,10 @@ class DataBase
 
         for (size_t i = 0; i < rows; i++)
         {
-            char operation = PQgetvalue(res, i, 0)[0];
-            int firstNumber = std::atoi(PQgetvalue(res, i, 1));
-            int secondNumber = std::atoi(PQgetvalue(res, i, 2));
-            double result = std::atof(PQgetvalue(res, i, 3));
+            char operation = PQgetvalue(res.get(), i, 0)[0];
+            int firstNumber = std::atoi(PQgetvalue(res.get(), i, 1));
+            int secondNumber = std::atoi(PQgetvalue(res.get(), i, 2));
+            double result = std::atof(PQgetvalue(res.get(), i, 3));
 
             utility::Logger::getInstance().log(
                 std::string("Loaded hew item FN: ") +
@@ -202,17 +193,33 @@ class DataBase
                 operations.emplace(key, result);
             }
         }
-
-        PQclear(res);
     }
 
   private:
-    const char* conninfo{"host=localhost port=5432 dbname=postgres "
-                         "connect_timeout=10 user=postgres password=1466"};
-    PGconn* conn{nullptr};
-    PGresult* res{nullptr};
-    PGnotify* notify{nullptr};
-    int nnotifies{0};
+    const std::string conninfo{
+        "host=localhost port=5432 dbname=postgres "
+        "connect_timeout=10 user=postgres password=1466"};
+
+    struct PGconnDeleter
+    {
+        void operator()(PGconn* conn) const
+        {
+            if (conn)
+                PQfinish(conn);
+        }
+    };
+
+    struct PGresultDeleter
+    {
+        void operator()(PGresult* res) const
+        {
+            if (res)
+                PQclear(res);
+        }
+    };
+
+    std::unique_ptr<PGconn, PGconnDeleter> conn;
+    std::unique_ptr<PGresult, PGresultDeleter> res;
 };
 
 class Application
