@@ -114,7 +114,8 @@ class DataBase
     }
 
     void WriteTask(int firstNumber, int secondNumber, char operation,
-                   double result) // NOLINT(unused-parameter)
+                   double result,
+                   int operationStatus) // NOLINT(unused-parameter)
     {
         if (!conn)
         {
@@ -126,11 +127,12 @@ class DataBase
 
         std::string connectionValue = "INSERT INTO public.calculation "
                                       "(operation, firstNumber, secondNumber, "
-                                      "result) VALUES ('" +
+                                      "result, operationstatus) VALUES ('" +
                                       std::string(1, operation) + "\', " +
                                       std::to_string(firstNumber) + ", " +
                                       std::to_string(secondNumber) + ", " +
-                                      std::to_string(result) + ");";
+                                      std::to_string(result) + ", " +
+                                      std::to_string(operationStatus) + ");";
 
         res.reset(PQexec(conn.get(), connectionValue.c_str()));
         if (PQresultStatus(res.get()) != PGRES_COMMAND_OK)
@@ -143,7 +145,8 @@ class DataBase
         }
     }
 
-    void GetOperations(std::unordered_map<std::string, int>& operations)
+    void GetOperations(
+        std::unordered_map<std::string, std::pair<int, int>>& operations)
     {
         if (!conn)
         {
@@ -177,12 +180,14 @@ class DataBase
             int firstNumber = std::atoi(PQgetvalue(res.get(), i, 1));
             int secondNumber = std::atoi(PQgetvalue(res.get(), i, 2));
             double result = std::atof(PQgetvalue(res.get(), i, 3));
+            int operationStatus = std::atoi(PQgetvalue(res.get(), i, 4));
 
             utility::Logger::getInstance().log(
                 std::string("Loaded hew item FN: ") +
                     std::to_string(firstNumber) +
                     ", SN: " + std::to_string(secondNumber) +
-                    +" Op: " + operation + " Res: " + std::to_string(result),
+                    +" Op: " + operation + " Res: " + std::to_string(result) +
+                    +" Status: " + std::to_string(operationStatus),
                 utility::Logger::LogLevel::INFO);
 
             std::string key = std::to_string(firstNumber) + operation +
@@ -190,7 +195,8 @@ class DataBase
 
             if (operations.find(key) == operations.end())
             {
-                operations.emplace(key, result);
+                operations.emplace(
+                    key, std::pair<int, int>(result, operationStatus));
             }
         }
     }
@@ -302,8 +308,11 @@ class Application
     void storeTask(const std::string& taskKey)
     {
         dataBase_.WriteTask(task_.firstNumber, task_.secondNumber,
-                            task_.operation, task_.result);
-        cash_.emplace(taskKey, task_.result);
+                            task_.operation, task_.result,
+                            static_cast<int>(task_.operationStatus));
+        cash_.emplace(taskKey, std::pair<int, int>(
+                                   task_.result,
+                                   static_cast<int>(task_.operationStatus)));
     }
 
     void makeCalculate()
@@ -362,7 +371,10 @@ class Application
         }
         else
         {
-            task_.result = cash_.find(taskKey)->second;
+            const std::pair<int, int> record = cash_.find(taskKey)->second;
+            task_.result = record.first;
+            task_.operationStatus =
+                static_cast<math::MathStatus>(record.second);
         }
     }
 
@@ -513,7 +525,7 @@ class Application
   private: // NOLINT(readability-redundant-access-specifiers)
     Task task_;
     DataBase dataBase_;
-    std::unordered_map<std::string, int> cash_;
+    std::unordered_map<std::string, std::pair<int, int>> cash_;
 };
 
 } // namespace calculator
