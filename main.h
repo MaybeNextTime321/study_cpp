@@ -125,16 +125,25 @@ class DataBase
             return;
         }
 
-        std::string connectionValue = "INSERT INTO public.calculation "
-                                      "(operation, firstNumber, secondNumber, "
-                                      "result, operationstatus) VALUES ('" +
-                                      std::string(1, operation) + "\', " +
-                                      std::to_string(firstNumber) + ", " +
-                                      std::to_string(secondNumber) + ", " +
-                                      std::to_string(result) + ", " +
-                                      std::to_string(operationStatus) + ");";
+        const char* command = "INSERT INTO public.calculation "
+                              "(operation, firstNumber, secondNumber, "
+                              "result, operationstatus) VALUES "
+                              "($1, $2, $3, $4, $5)";
 
-        res.reset(PQexec(conn.get(), connectionValue.c_str()));
+        const std::string operationParam(1, operation);
+        const std::string firstNumberParam = std::to_string(firstNumber);
+        const std::string secondNumberParam = std::to_string(secondNumber);
+        const std::string resultParam = std::to_string(result);
+        const std::string operationStatusParam =
+            std::to_string(operationStatus);
+
+        const char* paramValues[] = {
+            operationParam.c_str(), firstNumberParam.c_str(),
+            secondNumberParam.c_str(), resultParam.c_str(),
+            operationStatusParam.c_str()};
+
+        res.reset(PQexecParams(conn.get(), command, 5, nullptr, paramValues,
+                               nullptr, nullptr, 0));
         if (PQresultStatus(res.get()) != PGRES_COMMAND_OK)
         {
             utility::Logger::getInstance().log(
@@ -430,7 +439,10 @@ class Application
                 task_.operation = operation;
                 return true;
             default:
-                throw("Operator is empty or couldn't be parsed");
+                utility::Logger::getInstance().log(
+                    std::string("Operator is empty or couldn't be parsed"),
+                    utility::Logger::LogLevel::CRITICAL);
+                task_.operationStatus = math::MathStatus::ParseError;
                 return false;
         }
     }
@@ -474,7 +486,7 @@ class Application
         parseVariableToValue(jsonInput, task_.secondNumber, "secondNumber");
         std::string operationString{};
         parseVariableToValue(jsonInput, operationString, "operation");
-        task_.operation = operationString[0];
+        parseOperation(operationString.c_str());
 
         if (task_.operation == '*' || task_.operation == '+')
         {
