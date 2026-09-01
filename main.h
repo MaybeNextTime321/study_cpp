@@ -3,6 +3,7 @@
 
 #include <customMath.h>
 #include <getopt.h>
+#include <libpq-fe.h>
 #include <unistd.h>
 
 #include <nlohmann/json.hpp>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <unordered_map>
 
 #include "cmath"
 
@@ -73,6 +75,167 @@ class Logger
 
 namespace calculator
 {
+class DataBase
+{
+  public:
+    DataBase()
+    {
+        conn.reset(PQconnectdb(conninfo.c_str()));
+
+        if (!conn)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+
+        /* Check to see that the backend connection was successfully made */
+        if (PQstatus(conn.get()) != CONNECTION_OK)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base " +
+                            std::string(PQerrorMessage(conn.get()))),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+
+        res.reset(
+            PQexec(conn.get(),
+                   "SELECT pg_catalog.set_config('search_path', '', false)"));
+        if (PQresultStatus(res.get()) != PGRES_TUPLES_OK)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Data Base SET failed: " +
+                            std::string(PQerrorMessage(conn.get()))),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+    }
+
+    void WriteTask(int firstNumber, int secondNumber, char operation,
+                   double result,
+                   int operationStatus) // NOLINT(unused-parameter)
+    {
+        if (!conn)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+
+        const char* command = "INSERT INTO public.calculation "
+                              "(operation, firstNumber, secondNumber, "
+                              "result, operationstatus) VALUES "
+                              "($1, $2, $3, $4, $5)";
+
+        const std::string operationParam(1, operation);
+        const std::string firstNumberParam = std::to_string(firstNumber);
+        const std::string secondNumberParam = std::to_string(secondNumber);
+        const std::string resultParam = std::to_string(result);
+        const std::string operationStatusParam =
+            std::to_string(operationStatus);
+
+        const char* paramValues[] = {
+            operationParam.c_str(), firstNumberParam.c_str(),
+            secondNumberParam.c_str(), resultParam.c_str(),
+            operationStatusParam.c_str()};
+
+        res.reset(PQexecParams(conn.get(), command, 5, nullptr, paramValues,
+                               nullptr, nullptr, 0));
+        if (PQresultStatus(res.get()) != PGRES_COMMAND_OK)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Eroor while write in Data Base: " +
+                            std::string(PQerrorMessage(conn.get()))),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+    }
+
+    void GetOperations(
+        std::unordered_map<std::string, std::pair<int, int>>& operations)
+    {
+        if (!conn)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while connect to Data Base "),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+        res.reset(PQexec(conn.get(), "SELECT * FROM public.calculation"));
+
+        if (res == nullptr || PQresultStatus(res.get()) != PGRES_TUPLES_OK)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error While Get Operation from Data Base"),
+                utility::Logger::LogLevel::CRITICAL);
+            return;
+        }
+
+        utility::Logger::getInstance().log(
+            std::string("Start Loading Cash data: "),
+            utility::Logger::LogLevel::INFO);
+        size_t rows = PQntuples(res.get());
+
+        utility::Logger::getInstance().log(
+            std::string("Founded " + std::to_string(rows) + " records"),
+            utility::Logger::LogLevel::INFO);
+
+        for (size_t i = 0; i < rows; i++)
+        {
+            char operation = PQgetvalue(res.get(), i, 0)[0];
+            int firstNumber = std::atoi(PQgetvalue(res.get(), i, 1));
+            int secondNumber = std::atoi(PQgetvalue(res.get(), i, 2));
+            double result = std::atof(PQgetvalue(res.get(), i, 3));
+            int operationStatus = std::atoi(PQgetvalue(res.get(), i, 4));
+
+            utility::Logger::getInstance().log(
+                std::string("Loaded hew item FN: ") +
+                    std::to_string(firstNumber) +
+                    ", SN: " + std::to_string(secondNumber) +
+                    +" Op: " + operation + " Res: " + std::to_string(result) +
+                    +" Status: " + std::to_string(operationStatus),
+                utility::Logger::LogLevel::INFO);
+
+            std::string key = std::to_string(firstNumber) + operation +
+                              std::to_string(secondNumber);
+
+            if (operations.find(key) == operations.end())
+            {
+                operations.emplace(
+                    key, std::pair<int, int>(result, operationStatus));
+            }
+        }
+    }
+
+  private:
+    const std::string conninfo{
+        "host=localhost port=5432 dbname=postgres "
+        "connect_timeout=10 user=postgres password=1466"};
+
+    struct PGconnDeleter
+    {
+        void operator()(PGconn* conn) const
+        {
+            if (conn)
+                PQfinish(conn);
+        }
+    };
+
+    struct PGresultDeleter
+    {
+        void operator()(PGresult* res) const
+        {
+            if (res)
+                PQclear(res);
+        }
+    };
+
+    std::unique_ptr<PGconn, PGconnDeleter> conn;
+    std::unique_ptr<PGresult, PGresultDeleter> res;
+};
 
 class Application
 {
@@ -107,9 +270,19 @@ class Application
     void run(int argc, char** argv)
     {
         makeTask(argc, argv);
+        loadCashe();
         makeCalculate();
         printResult();
     }
+
+    struct Task
+    {
+        int firstNumber{0};
+        int secondNumber{0};
+        char operation{0};
+        double result{0.0};
+        math::MathStatus operationStatus{math::MathStatus::Ok};
+    };
 
   private:
     template <typename T>
@@ -130,6 +303,27 @@ class Application
         }
     }
 
+    void loadCashe()
+    {
+        if (task_.operationStatus != math::MathStatus::Ok)
+        {
+            return;
+        }
+
+        cash_.clear();
+        dataBase_.GetOperations(cash_);
+    }
+
+    void storeTask(const std::string& taskKey)
+    {
+        dataBase_.WriteTask(task_.firstNumber, task_.secondNumber,
+                            task_.operation, task_.result,
+                            static_cast<int>(task_.operationStatus));
+        cash_.emplace(taskKey, std::pair<int, int>(
+                                   task_.result,
+                                   static_cast<int>(task_.operationStatus)));
+    }
+
     void makeCalculate()
     {
         if (task_.operationStatus != math::MathStatus::Ok)
@@ -137,38 +331,59 @@ class Application
             return;
         }
 
-        switch (task_.operation)
+        const std::string taskKey = std::to_string(task_.firstNumber) +
+                                    task_.operation +
+                                    std::to_string(task_.secondNumber);
+
+        if (cash_.find(taskKey) == cash_.end())
         {
-            case '+':
-                task_.result = math::add(task_.firstNumber, task_.secondNumber,
-                                         task_.operationStatus);
-                break;
-            case '-':
-                task_.result =
-                    math::substract(task_.firstNumber, task_.secondNumber,
+            switch (task_.operation)
+            {
+                case '+':
+                    task_.result =
+                        math::add(task_.firstNumber, task_.secondNumber,
+                                  task_.operationStatus);
+                    storeTask(taskKey);
+                    break;
+                case '-':
+                    task_.result =
+                        math::substract(task_.firstNumber, task_.secondNumber,
+                                        task_.operationStatus);
+                    storeTask(taskKey);
+                    break;
+                case '*':
+                    task_.result =
+                        math::multiply(task_.firstNumber, task_.secondNumber,
+                                       task_.operationStatus);
+                    storeTask(taskKey);
+                    break;
+                case '/':
+                    task_.result =
+                        math::divide(task_.firstNumber, task_.secondNumber,
+                                     task_.operationStatus);
+                    storeTask(taskKey);
+                    break;
+                case '^':
+                    task_.result =
+                        math::power(task_.firstNumber, task_.secondNumber,
                                     task_.operationStatus);
-                break;
-            case '*':
-                task_.result =
-                    math::multiply(task_.firstNumber, task_.secondNumber,
-                                   task_.operationStatus);
-                break;
-            case '/':
-                task_.result =
-                    math::divide(task_.firstNumber, task_.secondNumber,
-                                 task_.operationStatus);
-                break;
-            case '^':
-                task_.result =
-                    math::power(task_.firstNumber, task_.secondNumber,
-                                task_.operationStatus);
-                break;
-            case '!':
-                task_.result =
-                    math::factorial(task_.firstNumber, task_.operationStatus);
-                break;
-            default:
-                break;
+                    storeTask(taskKey);
+                    break;
+                case '!':
+                    task_.result = math::factorial(task_.firstNumber,
+                                                   task_.operationStatus);
+                    storeTask(taskKey);
+                    break;
+                default:
+                    break;
+            }
+        }
+        else
+        {
+            const std::pair<int, int> record = cash_.find(taskKey)->second;
+            task_.result = record.first;
+            task_.operationStatus =
+                static_cast<math::MathStatus>(record.second);
         }
     }
 
@@ -224,7 +439,10 @@ class Application
                 task_.operation = operation;
                 return true;
             default:
-                throw("Operator is empty or couldn't be parsed");
+                utility::Logger::getInstance().log(
+                    std::string("Operator is empty or couldn't be parsed"),
+                    utility::Logger::LogLevel::CRITICAL);
+                task_.operationStatus = math::MathStatus::ParseError;
                 return false;
         }
     }
@@ -268,7 +486,23 @@ class Application
         parseVariableToValue(jsonInput, task_.secondNumber, "secondNumber");
         std::string operationString{};
         parseVariableToValue(jsonInput, operationString, "operation");
-        task_.operation = operationString[0];
+        parseOperation(operationString.c_str());
+
+        if (task_.operation == '*' || task_.operation == '+')
+        {
+            const int minValue =
+                std::min(task_.firstNumber, task_.secondNumber);
+            const int maxValue =
+                std::max(task_.firstNumber, task_.secondNumber);
+
+            task_.firstNumber = minValue;
+            task_.secondNumber = maxValue;
+        }
+
+        if (task_.operation == '!')
+        {
+            task_.secondNumber = 0;
+        }
     }
 
     void printHelp() // NOLINT(readability-convert-member-functions-to-static)
@@ -299,17 +533,11 @@ class Application
             "Note: wrap JSON in single quotes to prevent shell expansion",
             utility::Logger::LogLevel::INFO);
     }
-    struct Task
-    {
-        int firstNumber{0};
-        int secondNumber{0};
-        char operation{0};
-        double result{0.0};
-        math::MathStatus operationStatus{math::MathStatus::Ok};
-    };
 
   private: // NOLINT(readability-redundant-access-specifiers)
     Task task_;
+    DataBase dataBase_;
+    std::unordered_map<std::string, std::pair<int, int>> cash_;
 };
 
 } // namespace calculator
