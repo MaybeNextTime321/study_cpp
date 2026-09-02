@@ -6,12 +6,18 @@
 #include <libpq-fe.h>
 #include <unistd.h>
 
+#include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
+#include <thread>
 #include <unordered_map>
 
 #include "cmath"
@@ -211,9 +217,8 @@ class DataBase
     }
 
   private:
-    const std::string conninfo{
-        "host=localhost port=5432 dbname=postgres "
-        "connect_timeout=10 user=postgres password=1466"};
+    const std::string conninfo{"host=127.0.0.1 port=5432 dbname=postgres "
+                               "connect_timeout=1 user=postgres password=1466"};
 
     struct PGconnDeleter
     {
@@ -240,7 +245,21 @@ class DataBase
 class Application
 {
   public:
-    Application() : task_(Task()){};
+    struct CalculationResult
+    {
+        math::MathStatus status{math::MathStatus::Ok};
+        double result{0.0};
+    };
+
+    Application() : task_(Task())
+    {
+        signal_handler_installed_.store(false, std::memory_order_release);
+    };
+
+    ~Application() noexcept
+    {
+        StopSignalHandling();
+    }
 
     double GetResult() const
     {
@@ -267,12 +286,170 @@ class Application
         return task_.operationStatus;
     }
 
+    bool IsShutdownRequested() const
+    {
+        return shutdown_requested_.load(std::memory_order_acquire);
+    }
+
+    void StartSignalHandling()
+    {
+        if (signal_thread_started_.exchange(true, std::memory_order_acq_rel))
+        {
+            return;
+        }
+
+        shutdown_requested_.store(false, std::memory_order_release);
+        signal_thread_stop_.store(false, std::memory_order_release);
+
+        struct sigaction action
+        {};
+        action.sa_handler = &HandleTerminationSignal;
+        sigemptyset(&action.sa_mask);
+        action.sa_flags = 0;
+
+        if (sigaction(SIGTERM, &action, nullptr) != 0)
+        {
+            signal_thread_started_.store(false, std::memory_order_release);
+            utility::Logger::getInstance().log(
+                "Failed to install SIGTERM handler",
+                utility::Logger::LogLevel::ERROR);
+            return;
+        }
+
+        signal_handler_installed_.store(true, std::memory_order_release);
+
+        signal_monitor_thread_ = std::thread([this]() {
+            while (!signal_thread_stop_.load(std::memory_order_acquire))
+            {
+                if (shutdown_requested_.load(std::memory_order_acquire))
+                {
+                    utility::Logger::getInstance().log(
+                        "Shutdown requested by SIGTERM",
+                        utility::Logger::LogLevel::WARN);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+    }
+
+    void StopSignalHandling()
+    {
+        signal_thread_stop_.store(true, std::memory_order_release);
+
+        if (signal_monitor_thread_.joinable())
+        {
+            signal_monitor_thread_.join();
+        }
+
+        if (signal_handler_installed_.exchange(false,
+                                               std::memory_order_acq_rel))
+        {
+            struct sigaction action
+            {};
+            action.sa_handler = SIG_DFL;
+            sigemptyset(&action.sa_mask);
+            action.sa_flags = 0;
+            sigaction(SIGTERM, &action, nullptr);
+        }
+
+        signal_thread_started_.store(false, std::memory_order_release);
+    }
+
+    CalculationResult EvaluateJsonRequest(const std::string& jsonText)
+    {
+        Task localTask = createTaskFromJson(jsonText);
+        if (localTask.operationStatus != math::MathStatus::Ok)
+        {
+            return {localTask.operationStatus, 0.0};
+        }
+
+        const std::string taskKey = std::to_string(localTask.firstNumber) +
+                                    localTask.operation +
+                                    std::to_string(localTask.secondNumber);
+
+        if (cash_.find(taskKey) == cash_.end())
+        {
+            switch (localTask.operation)
+            {
+                case '+':
+                    localTask.result =
+                        math::add(localTask.firstNumber, localTask.secondNumber,
+                                  localTask.operationStatus);
+                    break;
+                case '-':
+                    localTask.result = math::substract(
+                        localTask.firstNumber, localTask.secondNumber,
+                        localTask.operationStatus);
+                    break;
+                case '*':
+                    localTask.result = math::multiply(
+                        localTask.firstNumber, localTask.secondNumber,
+                        localTask.operationStatus);
+                    break;
+                case '/':
+                    localTask.result = math::divide(localTask.firstNumber,
+                                                    localTask.secondNumber,
+                                                    localTask.operationStatus);
+                    break;
+                case '^':
+                    localTask.result = math::power(localTask.firstNumber,
+                                                   localTask.secondNumber,
+                                                   localTask.operationStatus);
+                    break;
+                case '!':
+                    localTask.result = math::factorial(
+                        localTask.firstNumber, localTask.operationStatus);
+                    break;
+                default:
+                    localTask.operationStatus = math::MathStatus::ParseError;
+                    break;
+            }
+        }
+        else
+        {
+            const std::pair<int, int> record = cash_.find(taskKey)->second;
+            localTask.result = record.first;
+            localTask.operationStatus =
+                static_cast<math::MathStatus>(record.second);
+        }
+
+        return {localTask.operationStatus, localTask.result};
+    }
+
     void run(int argc, char** argv)
     {
+        StartSignalHandling();
+
+        if (IsShutdownRequested())
+        {
+            StopSignalHandling();
+            return;
+        }
+
         makeTask(argc, argv);
+        if (IsShutdownRequested())
+        {
+            StopSignalHandling();
+            return;
+        }
+
         loadCashe();
+        if (IsShutdownRequested())
+        {
+            StopSignalHandling();
+            return;
+        }
+
         makeCalculate();
+        if (IsShutdownRequested())
+        {
+            StopSignalHandling();
+            return;
+        }
+
         printResult();
+        StopSignalHandling();
     }
 
     struct Task
@@ -287,7 +464,7 @@ class Application
   private:
     template <typename T>
     void parseVariableToValue(nlohmann::json& json, T& variableToWrite,
-                              const std::string& key)
+                              const std::string& key, Task& task)
     {
         try
         {
@@ -299,8 +476,54 @@ class Application
                 std::string("Error while loading " + key +
                             " in JSON. Please check you input"),
                 utility::Logger::LogLevel::CRITICAL);
-            task_.operationStatus = math::MathStatus::ParseError;
+            task.operationStatus = math::MathStatus::ParseError;
         }
+    }
+
+    Task parseTaskFromJson(const std::string& jsonText)
+    {
+        Task parsedTask{};
+        nlohmann::json jsonInput;
+
+        try
+        {
+            jsonInput = nlohmann::json::parse(jsonText);
+        }
+        catch (...)
+        {
+            utility::Logger::getInstance().log(
+                std::string("Error while loading JSON. Please check you input"),
+                utility::Logger::LogLevel::CRITICAL);
+            parsedTask.operationStatus = math::MathStatus::ParseError;
+            return parsedTask;
+        }
+
+        parseVariableToValue(jsonInput, parsedTask.firstNumber, "firstNumber",
+                             parsedTask);
+        parseVariableToValue(jsonInput, parsedTask.secondNumber, "secondNumber",
+                             parsedTask);
+        std::string operationString{};
+        parseVariableToValue(jsonInput, operationString, "operation",
+                             parsedTask);
+        parseOperationForTask(parsedTask, operationString.c_str());
+
+        if (parsedTask.operation == '*' || parsedTask.operation == '+')
+        {
+            const int minValue =
+                std::min(parsedTask.firstNumber, parsedTask.secondNumber);
+            const int maxValue =
+                std::max(parsedTask.firstNumber, parsedTask.secondNumber);
+
+            parsedTask.firstNumber = minValue;
+            parsedTask.secondNumber = maxValue;
+        }
+
+        if (parsedTask.operation == '!')
+        {
+            parsedTask.secondNumber = 0;
+        }
+
+        return parsedTask;
     }
 
     void loadCashe()
@@ -424,6 +647,11 @@ class Application
         const char*
             optarg) // NOLINT(readability-convert-member-functions-to-static,-warnings-as-errors)
     {
+        return parseOperationForTask(task_, optarg);
+    }
+
+    bool parseOperationForTask(Task& targetTask, const char* optarg)
+    {
         const char operation = *optarg;
         switch (operation)
         {
@@ -436,13 +664,13 @@ class Application
                 utility::Logger::getInstance().log(
                     std::string("Parsed op::") + operation,
                     utility::Logger::LogLevel::INFO);
-                task_.operation = operation;
+                targetTask.operation = operation;
                 return true;
             default:
                 utility::Logger::getInstance().log(
                     std::string("Operator is empty or couldn't be parsed"),
                     utility::Logger::LogLevel::CRITICAL);
-                task_.operationStatus = math::MathStatus::ParseError;
+                targetTask.operationStatus = math::MathStatus::ParseError;
                 return false;
         }
     }
@@ -466,43 +694,12 @@ class Application
             return;
         }
 
-        nlohmann::json jsonInput;
+        task_ = parseTaskFromJson(argv[1]);
+    }
 
-        try
-        {
-            jsonInput = nlohmann::json::parse(
-                argv[1]); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        }
-        catch (...)
-        {
-            utility::Logger::getInstance().log(
-                std::string("Error while loading JSON. Please check you input"),
-                utility::Logger::LogLevel::CRITICAL);
-            task_.operationStatus = math::MathStatus::ParseError;
-            return;
-        }
-
-        parseVariableToValue(jsonInput, task_.firstNumber, "firstNumber");
-        parseVariableToValue(jsonInput, task_.secondNumber, "secondNumber");
-        std::string operationString{};
-        parseVariableToValue(jsonInput, operationString, "operation");
-        parseOperation(operationString.c_str());
-
-        if (task_.operation == '*' || task_.operation == '+')
-        {
-            const int minValue =
-                std::min(task_.firstNumber, task_.secondNumber);
-            const int maxValue =
-                std::max(task_.firstNumber, task_.secondNumber);
-
-            task_.firstNumber = minValue;
-            task_.secondNumber = maxValue;
-        }
-
-        if (task_.operation == '!')
-        {
-            task_.secondNumber = 0;
-        }
+    Task createTaskFromJson(const std::string& jsonText)
+    {
+        return parseTaskFromJson(jsonText);
     }
 
     void printHelp() // NOLINT(readability-convert-member-functions-to-static)
@@ -534,10 +731,242 @@ class Application
             utility::Logger::LogLevel::INFO);
     }
 
-  private: // NOLINT(readability-redundant-access-specifiers)
+  private:
+    static void HandleTerminationSignal(int signal_number)
+    {
+        if (signal_number != SIGTERM)
+        {
+            return;
+        }
+
+        shutdown_requested_.store(true, std::memory_order_release);
+    }
+
+    static inline std::atomic<bool> shutdown_requested_{false};
+    static inline std::atomic<bool> signal_handler_installed_{false};
+    static inline std::atomic<bool> signal_thread_started_{false};
+    static inline std::atomic<bool> signal_thread_stop_{false};
+
     Task task_;
     DataBase dataBase_;
     std::unordered_map<std::string, std::pair<int, int>> cash_;
+    std::thread signal_monitor_thread_;
+};
+
+class NetworkServer
+{
+  public:
+    NetworkServer(const std::string& host, unsigned short port) :
+        host_(host), port_(port),
+        acceptor_(io_context_, boost::asio::ip::tcp::endpoint(
+                                   boost::asio::ip::make_address(host), port))
+    {
+        port_ = acceptor_.local_endpoint().port();
+    }
+
+    ~NetworkServer()
+    {
+        Stop();
+    }
+
+    void Start()
+    {
+        if (accepting_.exchange(true, std::memory_order_acq_rel))
+        {
+            return;
+        }
+
+        acceptor_.listen();
+        port_ = acceptor_.local_endpoint().port();
+        acceptor_.non_blocking(true);
+        accept_thread_ = std::thread([this]() {
+            while (accepting_.load(std::memory_order_acquire))
+            {
+                try
+                {
+                    auto client_socket =
+                        std::make_unique<boost::asio::ip::tcp::socket>(
+                            io_context_);
+                    boost::system::error_code accept_error;
+                    acceptor_.accept(*client_socket, accept_error);
+
+                    if (accept_error == boost::asio::error::would_block ||
+                        accept_error == boost::asio::error::try_again)
+                    {
+                        std::this_thread::yield();
+                        continue;
+                    }
+                    if (accept_error)
+                    {
+                        if (!accepting_.load(std::memory_order_acquire))
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    if (!accepting_.load(std::memory_order_acquire))
+                    {
+                        break;
+                    }
+
+                    std::string request = ReadMessage(*client_socket);
+                    Application application;
+                    const Application::CalculationResult result =
+                        application.EvaluateJsonRequest(request);
+                    const std::string response = BuildResponse(result);
+                    WriteMessage(*client_socket, response);
+                    client_socket->close();
+                }
+                catch (const boost::system::system_error&)
+                {
+                    if (!accepting_.load(std::memory_order_acquire))
+                    {
+                        break;
+                    }
+                }
+                catch (...)
+                {
+                    if (!accepting_.load(std::memory_order_acquire))
+                    {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    void Stop()
+    {
+        accepting_.store(false, std::memory_order_release);
+
+        if (accept_thread_.joinable())
+        {
+            accept_thread_.join();
+        }
+
+        boost::system::error_code ignored;
+        acceptor_.cancel(ignored);
+        acceptor_.close(ignored);
+    }
+
+    unsigned short GetPort() const
+    {
+        return port_;
+    }
+
+  private:
+    static std::string
+        BuildResponse(const Application::CalculationResult& result)
+    {
+        nlohmann::json responseJson;
+        responseJson["status"] =
+            result.status == math::MathStatus::Ok ? "OK" : "ERROR";
+        responseJson["result"] = result.result;
+        responseJson["error"] =
+            result.status == math::MathStatus::Ok ? "" : "operation_error";
+        return responseJson.dump();
+    }
+
+    static std::string ReadMessage(boost::asio::ip::tcp::socket& socket)
+    {
+        boost::asio::streambuf buffer;
+        boost::asio::read_until(socket, buffer, '\n');
+
+        std::istream input_stream(&buffer);
+        std::string message;
+        std::getline(input_stream, message);
+
+        if (!message.empty() && message.back() == '\r')
+        {
+            message.pop_back();
+        }
+
+        return message;
+    }
+
+    static void WriteMessage(boost::asio::ip::tcp::socket& socket,
+                             const std::string& message)
+    {
+        const std::string frame = message + "\n";
+        boost::asio::write(socket, boost::asio::buffer(frame));
+    }
+
+    std::string host_;
+    unsigned short port_;
+    boost::asio::io_context io_context_{};
+    boost::asio::ip::tcp::acceptor acceptor_;
+    std::atomic<bool> accepting_{false};
+    std::thread accept_thread_;
+};
+
+class NetworkClient
+{
+  public:
+    NetworkClient(const std::string& host, unsigned short port) :
+        host_(host), port_(port)
+    {}
+
+    bool SendRequest(const std::string& request, std::string& response,
+                     std::chrono::milliseconds timeout)
+    {
+        try
+        {
+            boost::asio::io_context io_context;
+            boost::asio::ip::tcp::socket socket(io_context);
+            boost::asio::ip::tcp::resolver resolver(io_context);
+            boost::asio::connect(
+                socket, resolver.resolve(host_, std::to_string(port_)));
+
+            std::atomic<bool> completed{false};
+            std::thread timeoutThread([&]() {
+                std::this_thread::sleep_for(timeout);
+                if (!completed.load(std::memory_order_acquire))
+                {
+                    socket.cancel();
+                }
+            });
+
+            try
+            {
+                boost::asio::write(socket, boost::asio::buffer(request + "\n"));
+                boost::asio::streambuf response_buffer;
+                boost::asio::read_until(socket, response_buffer, '\n');
+
+                std::istream input_stream(&response_buffer);
+                std::string payload;
+                std::getline(input_stream, payload);
+                if (!payload.empty() && payload.back() == '\r')
+                {
+                    payload.pop_back();
+                }
+
+                completed.store(true, std::memory_order_release);
+                timeoutThread.join();
+                response = payload;
+                socket.close();
+                return true;
+            }
+            catch (...)
+            {
+                completed.store(true, std::memory_order_release);
+                timeoutThread.join();
+                throw;
+            }
+        }
+        catch (const boost::system::system_error&)
+        {
+            return false;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+  private:
+    std::string host_;
+    unsigned short port_;
 };
 
 } // namespace calculator

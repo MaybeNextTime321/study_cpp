@@ -1,8 +1,31 @@
 #include "../main.h"
 
+#include <chrono>
 #include <iostream>
+#include <thread>
 
 #include <gtest/gtest.h>
+
+namespace
+{
+std::string WaitForResponse(calculator::NetworkClient& client,
+                            const std::string& request,
+                            std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        std::string response;
+        if (client.SendRequest(request, response,
+                               std::chrono::milliseconds(10)))
+        {
+            return response;
+        }
+        std::this_thread::yield();
+    }
+    return {};
+}
+} // namespace
 
 TEST(HelpFunction, InputTest)
 {
@@ -168,4 +191,48 @@ TEST(FactorialFromNegative, SubtractionUnderflow)
     application.run(2, argv);
 
     EXPECT_EQ(math::MathStatus::FactorialFromNegative, application.GetStatus());
+}
+
+TEST(SIGTERMHandling, SignalThreadSetsShutdownFlag)
+{
+    calculator::Application application;
+    application.StartSignalHandling();
+
+    EXPECT_FALSE(application.IsShutdownRequested());
+
+    std::thread signalSender([]() { ::kill(getpid(), SIGTERM); });
+    signalSender.join();
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (!application.IsShutdownRequested() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::yield();
+    }
+
+    EXPECT_TRUE(application.IsShutdownRequested());
+
+    application.StopSignalHandling();
+}
+
+TEST(NetworkServer, HandlesAdditionRequest)
+{
+    calculator::NetworkServer server("127.0.0.1", 0);
+    server.Start();
+
+    const auto expectedPort = server.GetPort();
+    ASSERT_GT(expectedPort, 0u);
+
+    calculator::NetworkClient client("127.0.0.1", expectedPort);
+    const std::string request =
+        R"({"firstNumber": 5, "secondNumber": 3, "operation": "+"})";
+
+    const std::string response =
+        WaitForResponse(client, request, std::chrono::seconds(5));
+
+    ASSERT_FALSE(response.empty());
+    EXPECT_NE(response.find("\"result\":8"), std::string::npos);
+
+    server.Stop();
 }
